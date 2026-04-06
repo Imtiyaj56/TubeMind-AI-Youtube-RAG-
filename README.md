@@ -1,9 +1,6 @@
-<<<<<<< HEAD
 # TubeMind-AI-Youtube-RAG-
-=======
-# YouTube RAG — AI Video Assistant
 
-An end-to-end, multilingual Retrieval-Augmented Generation (RAG) web application that allows you to chat interactively with any YouTube video. The application automatically fetches video transcripts, processes the text into a vector database, and uses advanced Language Models to answer your questions in real-time, streaming token-by-token directly into a premium, ChatGPT-like user interface.
+An end-to-end, RAG web application that allows you to chat interactively with any YouTube video. The application automatically fetches video transcripts, processes the text into a vector database, and uses advanced Language Models to answer your questions in real-time, streaming token-by-token directly into a premium, ChatGPT-like user interface.
 
 ## 🌟 Key Features
 
