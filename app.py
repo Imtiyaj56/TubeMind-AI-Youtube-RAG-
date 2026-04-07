@@ -56,6 +56,9 @@ async def fetch_video_metadata(video_id: str) -> dict:
 
 @app.get("/")
 async def serve_frontend():
+    # Smart check: look in 'static' first (local), then root (Hugging Face)
+    if os.path.exists("static/index.html"):
+        return FileResponse("static/index.html")
     return FileResponse("index.html")
 
 @app.post("/api/process_video")
@@ -150,7 +153,9 @@ async def delete_session(video_id: str):
     chat_histories.pop(video_id, None)
     return {"success": True}
 
-app.mount("/static", StaticFiles(directory="."), name="static")
+# Smart static file mounting
+static_path = "static" if os.path.exists("static") else "."
+app.mount("/static", StaticFiles(directory=static_path), name="static")
 
 if __name__ == "__main__":
     import uvicorn
