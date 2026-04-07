@@ -147,7 +147,12 @@ def build_rag_pipeline(video_id: str) -> dict:
     if not transcript or not transcript.strip():
         raise Exception("Transcript is empty. The video may have no spoken content.")
 
-    # ---------------------- Core RAG Pipeline (unchanged) ----------------------
+   
+   
+   
+   
+   
+    # ---------------------- Core RAG Pipeline ------------------------------
 
     # Initialize the recursive character text splitter to break transcript into chunks
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
