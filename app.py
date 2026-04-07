@@ -56,7 +56,7 @@ async def fetch_video_metadata(video_id: str) -> dict:
 
 @app.get("/")
 async def serve_frontend():
-    return FileResponse("static/index.html")
+    return FileResponse("index.html")
 
 @app.post("/api/process_video")
 async def process_video(req: ProcessVideoRequest):
@@ -140,13 +140,17 @@ async def get_sessions():
         })
     return {"sessions": sessions}
 
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok"}
+
 @app.delete("/api/session/{video_id}")
 async def delete_session(video_id: str):
     video_sessions.pop(video_id, None)
     chat_histories.pop(video_id, None)
     return {"success": True}
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory="."), name="static")
 
 if __name__ == "__main__":
     import uvicorn
