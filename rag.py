@@ -1,4 +1,7 @@
 # Import necessary modules for the RAG pipeline
+import os
+import tempfile
+import logging
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -13,11 +16,15 @@ from langchain_classic.retrievers.document_compressors import LLMChainExtractor
 from langchain_core.runnables import RunnableLambda, RunnableParallel, RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
+# Configure logging
+logger = logging.getLogger(__name__)
+
 # Load environment variables (like API keys)
 load_dotenv()
 
-# Global variables for caching the embedding model
+# Global variables for caching the embedding model and whisper model
 _embedding_model = None
+_whisper_model = None
 
 # Initialize the Groq LLM (Llama 3.3 70B model)
 llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.2)
@@ -35,23 +42,110 @@ def get_embedding_model():
         )
     return _embedding_model
 
+def get_whisper_model():
+    """
+    Helper function to load the faster-whisper model.
+    Uses a singleton pattern to avoid reloading the model on every fallback call.
+    The 'base' model offers a good balance of speed and accuracy for CPU inference.
+    """
+    global _whisper_model
+    if _whisper_model is None:
+        from faster_whisper import WhisperModel
+        logger.info("Loading faster-whisper 'base' model (first time may download ~150MB)...")
+        _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+    return _whisper_model
+
+def get_transcript_fallback(video_id: str) -> str:
+    """
+    Fallback method: Downloads audio from a YouTube video using yt-dlp,
+    then transcribes it locally using faster-whisper.
+    The temporary audio file is deleted after transcription.
+    """
+    import yt_dlp
+
+    logger.info(f"Fallback: Downloading audio for video '{video_id}' via yt-dlp...")
+
+    # Create a temporary directory to store the downloaded audio
+    temp_dir = tempfile.mkdtemp()
+    output_path = os.path.join(temp_dir, "audio.m4a")
+
+    # yt-dlp options: download best audio only, convert to m4a
+    ydl_opts = {
+        'format': 'bestaudio[ext=m4a]/bestaudio/best',
+        'outtmpl': output_path,
+        'quiet': True,
+        'no_warnings': True,
+    }
+
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+    try:
+        # Download the audio
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([video_url])
+
+        if not os.path.exists(output_path):
+            raise FileNotFoundError("Audio download failed — file not found.")
+
+        logger.info("Audio downloaded. Transcribing with faster-whisper...")
+
+        # Transcribe the audio using faster-whisper
+        model = get_whisper_model()
+        segments, info = model.transcribe(output_path, beam_size=5)
+
+        # Combine all transcribed segments into a single string
+        transcript = " ".join(segment.text.strip() for segment in segments)
+
+        logger.info(f"Transcription complete. Detected language: {info.language} "
+                     f"(probability: {info.language_probability:.2f})")
+
+        return transcript
+
+    finally:
+        # Clean up: delete the temporary audio file
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        if os.path.exists(temp_dir):
+            os.rmdir(temp_dir)
+
 def build_rag_pipeline(video_id: str) -> dict:
     """
     Builds and returns the LangChain RAG pipeline for a given YouTube video.
     Fetches the transcript, chunks it, creates a vector store, sets up document compression,
     and returns a ready-to-use LLM chain.
+
+    Uses a hybrid approach:
+      1. First tries the YouTube Transcript API (instant, no compute).
+      2. If that fails, falls back to downloading audio via yt-dlp and
+         transcribing locally with faster-whisper.
     """
+    transcript = None
+
+    # --- Strategy 1: YouTube Transcript API ---
     try:
-        # Fetch the transcript for the video. Try English, Hindi, and auto-generated transcripts.
+        logger.info(f"Attempting to fetch transcript via YouTube API for video '{video_id}'...")
         fetched = YouTubeTranscriptApi().fetch(video_id, languages=['en', 'hi', 'auto'])
         raw = fetched.to_raw_data()
-        
-        # Combine the transcript chunks into a single large string
         transcript = " ".join(chunk["text"] for chunk in raw)
-    except TranscriptsDisabled:
-        raise Exception("Transcripts are disabled for this video.")
-    except Exception as e:
-        raise Exception(f"Could not fetch transcript: {str(e)}")
+        logger.info("Transcript fetched successfully via YouTube API.")
+    except Exception as api_error:
+        logger.warning(f"YouTube API failed: {api_error}. Switching to Whisper fallback...")
+
+    # --- Strategy 2: yt-dlp + faster-whisper fallback ---
+    if not transcript:
+        try:
+            transcript = get_transcript_fallback(video_id)
+        except Exception as fallback_error:
+            raise Exception(
+                f"Both transcript methods failed.\n"
+                f"  YouTube API error: {api_error}\n"
+                f"  Whisper fallback error: {fallback_error}"
+            )
+
+    if not transcript or not transcript.strip():
+        raise Exception("Transcript is empty. The video may have no spoken content.")
+
+    # ---------------------- Core RAG Pipeline (unchanged) ----------------------
 
     # Initialize the recursive character text splitter to break transcript into chunks
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
