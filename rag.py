@@ -121,6 +121,7 @@ def build_rag_pipeline(video_id: str) -> dict:
     """
     transcript = None
 
+    api_error_msg = "None"
     # --- Strategy 1: YouTube Transcript API ---
     try:
         logger.info(f"Attempting to fetch transcript via YouTube API for video '{video_id}'...")
@@ -128,8 +129,9 @@ def build_rag_pipeline(video_id: str) -> dict:
         raw = fetched.to_raw_data()
         transcript = " ".join(chunk["text"] for chunk in raw)
         logger.info("Transcript fetched successfully via YouTube API.")
-    except Exception as api_error:
-        logger.warning(f"YouTube API failed: {api_error}. Switching to Whisper fallback...")
+    except Exception as e:
+        api_error_msg = str(e)
+        logger.warning(f"YouTube API failed: {api_error_msg}. Switching to Whisper fallback...")
 
     # --- Strategy 2: yt-dlp + faster-whisper fallback ---
     if not transcript:
@@ -138,8 +140,8 @@ def build_rag_pipeline(video_id: str) -> dict:
         except Exception as fallback_error:
             raise Exception(
                 f"Both transcript methods failed.\n"
-                f"  YouTube API error: {api_error}\n"
-                f"  Whisper fallback error: {fallback_error}"
+                f"  YouTube API error: {api_error_msg}\n"
+                f"  Whisper fallback error: {str(fallback_error)}"
             )
 
     if not transcript or not transcript.strip():
