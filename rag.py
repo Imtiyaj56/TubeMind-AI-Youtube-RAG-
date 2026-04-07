@@ -81,7 +81,7 @@ def build_rag_pipeline(video_id: str) -> dict:
     try:
         logger.info(f"Trying API for {video_id}...")
         # Note: cookies.txt doesn't work easily here, so we rely on Whisper fallback more on HF
-        transcript_list = YouTubeTranscriptApi.fetch(video_id, languages=['en', 'hi', 'auto'])
+        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'hi', 'auto'])
         transcript = " ".join(item["text"] for item in transcript_list)
         logger.info("Transcript fetched successfully via API.")
     except Exception as e:
