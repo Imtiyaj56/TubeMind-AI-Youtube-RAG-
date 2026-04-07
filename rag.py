@@ -38,7 +38,7 @@ def get_embedding_model():
     if _embedding_model is None:
         # Load the multilingual MiniLM model
         _embedding_model = HuggingFaceEmbeddings(
-            model='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
+            model_name='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
         )
     return _embedding_model
 
