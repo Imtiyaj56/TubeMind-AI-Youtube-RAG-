@@ -125,9 +125,9 @@ def build_rag_pipeline(video_id: str) -> dict:
     # --- Strategy 1: YouTube Transcript API ---
     try:
         logger.info(f"Attempting to fetch transcript via YouTube API for video '{video_id}'...")
-        fetched = YouTubeTranscriptApi().fetch(video_id, languages=['en', 'hi', 'auto'])
-        raw = fetched.to_raw_data()
-        transcript = " ".join(chunk["text"] for chunk in raw)
+        # Corrected: Use get_transcript instead of fetch
+        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'hi', 'auto'])
+        transcript = " ".join(item["text"] for item in transcript_list)
         logger.info("Transcript fetched successfully via YouTube API.")
     except Exception as e:
         api_error_msg = str(e)
