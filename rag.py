@@ -1,6 +1,4 @@
 import os
-import tempfile
-import logging
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -15,10 +13,12 @@ from langchain.retrievers.document_compressors import LLMChainExtractor
 from langchain_core.runnables import RunnableLambda, RunnableParallel, RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
-logger = logging.getLogger(__name__)
 load_dotenv()
 
-_embedding_model = None
+# Model initialization - Pre-loaded for speed
+_embedding_model = HuggingFaceEmbeddings(
+    model_name='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
+)
 _whisper_model = None
 
 # LLM Model
@@ -26,11 +26,6 @@ LLM_MODEL = "llama-3.1-8b-instant"
 llm = ChatGroq(model=LLM_MODEL, temperature=0.2)
 
 def get_embedding_model():
-    global _embedding_model
-    if _embedding_model is None:
-        _embedding_model = HuggingFaceEmbeddings(
-            model_name='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
-        )
     return _embedding_model
 
 def get_whisper_model():
@@ -42,9 +37,8 @@ def get_whisper_model():
 
 def get_transcript_fallback(video_id: str) -> str:
     import yt_dlp
-    logger.info(f"Fallback: Downloading audio for {video_id}...")
-    temp_dir = tempfile.mkdtemp()
-    output_path = os.path.join(temp_dir, "audio.m4a")
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+    output_path = f"temp_audio_{video_id}.m4a"
     
     ydl_opts = {
         'format': 'bestaudio[ext=m4a]/bestaudio/best',
@@ -55,38 +49,45 @@ def get_transcript_fallback(video_id: str) -> str:
         'referer': 'https://www.youtube.com/',
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     }
-    
-    # ADDED: Support for optional cookies.txt to bypass YouTube blocks
     if os.path.exists("cookies.txt"):
         ydl_opts['cookiefile'] = 'cookies.txt'
-        logger.info("Using cookies.txt for yt-dlp download...")
     
-    video_url = f"https://www.youtube.com/watch?v={video_id}"
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
+        
         if not os.path.exists(output_path):
             raise FileNotFoundError("Audio download failed.")
+        
         model = get_whisper_model()
         segments, info = model.transcribe(output_path, beam_size=5)
         return " ".join(segment.text.strip() for segment in segments)
     finally:
-        if os.path.exists(output_path): os.remove(output_path)
-        if os.path.exists(temp_dir): os.rmdir(temp_dir)
+        if os.path.exists(output_path): 
+            try:
+                os.remove(output_path)
+            except Exception:
+                pass
 
 def build_rag_pipeline(video_id: str) -> dict:
     transcript = None
     api_error_msg = "None"
 
     try:
-        logger.info(f"Trying API for {video_id}...")
-        # Note: cookies.txt doesn't work easily here, so we rely on Whisper fallback more on HF
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'hi', 'auto'])
-        transcript = " ".join(item["text"] for item in transcript_list)
-        logger.info("Transcript fetched successfully via API.")
+        # List all available transcripts to be more flexible
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        
+        try:
+            # Try to find preferred languages manually or auto-generated
+            transcript_obj = transcript_list.find_transcript(['en', 'hi'])
+        except Exception:
+            # Fallback to the first available transcript in any language
+            transcript_obj = next(iter(transcript_list))
+
+        transcript_data = transcript_obj.fetch()
+        transcript = " ".join(item["text"] for item in transcript_data)
     except Exception as e:
         api_error_msg = str(e)
-        logger.warning(f"API failed, switching to fallback...")
 
     if not transcript:
         try:
@@ -95,11 +96,12 @@ def build_rag_pipeline(video_id: str) -> dict:
             raise Exception(f"Failed to fetch content. Error: {str(fallback_error)}")
 
     # ---------------------- Core RAG Pipeline ----------------------
+    # ---------------------- Core RAG Pipeline ----------------------
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = splitter.create_documents([transcript])
     for doc in chunks: 
         doc.page_content = "passage: " + doc.page_content
-
+    
     emb_model = get_embedding_model()
     vector_store = FAISS.from_documents(documents=chunks, embedding=emb_model)
     
