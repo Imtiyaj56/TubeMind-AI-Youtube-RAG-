@@ -96,7 +96,6 @@ def build_rag_pipeline(video_id: str) -> dict:
             raise Exception(f"Failed to fetch content. Error: {str(fallback_error)}")
 
     # ---------------------- Core RAG Pipeline ----------------------
-    # ---------------------- Core RAG Pipeline ----------------------
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = splitter.create_documents([transcript])
     for doc in chunks: 
